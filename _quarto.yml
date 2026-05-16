@@ -1,0 +1,36 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Clinical Trial Statistics"
+  navbar:
+    left:
+      - href: README.md
+        text: Home
+      - text: Topics
+        menu:
+          - href: 01-estimand/estimand.qmd
+            text: "01. Estimand"
+          - href: 02-survival-analysis/survival.qmd
+            text: "02. Survival Analysis"
+          - href: 03-mmrm/mmrm.qmd
+            text: "03. MMRM"
+          - href: 04-missing-data/missing_data.qmd
+            text: "04. Missing Data"
+          - href: 05-multiple-testing/multiple_testing.qmd
+            text: "05. Multiple Testing"
+          - href: 06-interim-analysis/interim_analysis.qmd
+            text: "06. Interim Analysis"
+          - href: 07-sample-size/sample_size.qmd
+            text: "07. Sample Size"
+          - href: 08-regulatory/regulatory.qmd
+            text: "08. Regulatory"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    highlight-style: github

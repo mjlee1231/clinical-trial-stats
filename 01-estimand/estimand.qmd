@@ -1,0 +1,241 @@
+---
+title: "01. Estimand Framework"
+subtitle: "ICH E9(R1) & Analysis Populations in Clinical Trials"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+The estimand framework was introduced in ICH E9(R1) (2019) to address a fundamental
+ambiguity in clinical trial analysis: the research question being asked and the
+statistical analysis performed were often not precisely aligned. The framework
+forces explicit agreement on *what* is being estimated before choosing *how* to
+estimate it.
+
+| Component | Description |
+|-----------|-------------|
+| Population | Who is being studied |
+| Variable | The outcome of interest |
+| Intercurrent event strategy | How post-randomization events are handled |
+| Population-level summary | The measure of treatment effect (e.g., mean difference, HR) |
+
+---
+
+## 1. What is an Estimand?
+
+An estimand specifies exactly what a clinical trial is trying to estimate.
+
+Historically, stating "primary analysis will follow ITT" left unanswered:
+
+- How to handle patients who switched treatment mid-trial
+- How to treat outcomes for patients who died before the endpoint
+- Whether rescue medication use should be considered a failure
+
+The estimand framework resolves this by separating the *question* from the *method*.
+
+### The Four Components
+
+```
+Estimand = Population
+         + Variable (endpoint)
+         + Intercurrent event handling strategy
+         + Population-level summary
+```
+
+**Example:**
+
+> "In patients aged ≥18 with moderate asthma (Population),  
+> the change from baseline in FEV1 at week 52 (Variable),  
+> regardless of treatment discontinuation (ICE: treatment policy strategy),  
+> estimated as the mean difference versus placebo (Summary)"
+
+---
+
+## 2. Intercurrent Events (ICE)
+
+An intercurrent event is any post-randomization event that affects either the
+interpretation or existence of the endpoint measurement.
+
+**Common examples:**
+
+- Treatment discontinuation
+- Use of rescue medication
+- Death (when the endpoint is non-fatal)
+- Protocol deviation affecting treatment exposure
+
+### The Five ICE Handling Strategies
+
+| Strategy | Definition | Typical use case |
+|----------|-----------|-----------------|
+| **Treatment policy** | Analyze as randomized, regardless of ICE | When the real-world effect matters most |
+| **Hypothetical** | Estimate the outcome had the ICE not occurred | Isolating the biological effect of treatment |
+| **Composite** | Incorporate the ICE into the outcome (e.g., discontinuation = failure) | When the ICE is itself a clinically meaningful event |
+| **While on treatment** | Use only data collected prior to the ICE | Pharmacodynamic or mechanism studies |
+| **Principal stratum** | Restrict to patients who would not experience the ICE | Subgroup-specific causal estimands |
+
+::: {.callout-note}
+Treatment policy strategy and ITT are related but distinct concepts.
+ITT defines *who is included* (the analysis population).
+Treatment policy defines *how ICEs are handled* (the estimand strategy).
+Treatment policy + FAS is the modern equivalent of the traditional ITT analysis.
+:::
+
+---
+
+## 3. Analysis Populations
+
+### Definitions
+
+| Population | Inclusion Criteria | Primary use |
+|-----------|-------------------|-------------|
+| **Full Analysis Set (FAS)** | All randomized patients who received at least one dose | Effectiveness; regulatory submissions |
+| **mITT** | Study-specific (e.g., patients with a baseline measurement) | Defined per protocol |
+| **Per-Protocol (PP)** | Patients who complied with the protocol without major deviations | Efficacy under ideal conditions |
+| **Safety Set** | All patients who received at least one dose | Safety analyses |
+
+### Choosing the Primary Population
+
+```
+Superiority trial     → FAS primary, PP supportive
+Non-inferiority trial → BOTH FAS AND PP as co-primary
+Regulatory submission → FAS/ITT primary
+```
+
+::: {.callout-warning}
+In non-inferiority trials, FAS alone is insufficient. Non-compliant patients dilute
+the difference between arms, which can spuriously support a NI conclusion.
+Both FAS and PP must demonstrate non-inferiority.
+:::
+
+---
+
+## 4. R Code
+
+```{r}
+#| label: setup
+library(dplyr)
+library(ggplot2)
+library(knitr)
+```
+
+### 4.1 Simulating Analysis Population Assignment
+
+```{r}
+#| label: analysis-sets
+
+set.seed(42)
+n <- 200
+
+patients <- tibble(
+  id = 1:n,
+  randomized         = TRUE,
+  received_treatment = sample(c(TRUE, FALSE), n, replace = TRUE, prob = c(0.97, 0.03)),
+  protocol_deviated  = sample(c(TRUE, FALSE), n, replace = TRUE, prob = c(0.15, 0.85)),
+  baseline_measured  = sample(c(TRUE, FALSE), n, replace = TRUE, prob = c(0.98, 0.02))
+) |>
+  mutate(
+    in_FAS    = randomized & received_treatment,
+    in_mITT   = in_FAS & baseline_measured,
+    in_PP     = in_FAS & !protocol_deviated & baseline_measured,
+    in_safety = received_treatment
+  )
+
+patients |>
+  summarise(
+    FAS    = sum(in_FAS),
+    mITT   = sum(in_mITT),
+    PP     = sum(in_PP),
+    Safety = sum(in_safety)
+  ) |>
+  kable(caption = "Patient counts by analysis population (simulated)")
+```
+
+### 4.2 Effect of ICE Strategy on Estimated Treatment Effect
+
+```{r}
+#| label: ice-simulation
+
+set.seed(123)
+n_patients <- 100
+
+trial_data <- tibble(
+  id           = 1:n_patients,
+  arm          = rep(c("Treatment", "Placebo"), each = n_patients / 2),
+  week_12      = rnorm(n_patients,
+                       mean = ifelse(rep(c("Treatment", "Placebo"), each = 50) == "Treatment", -2, -0.5),
+                       sd = 1.5),
+  discontinued = sample(c(TRUE, FALSE), n_patients, replace = TRUE, prob = c(0.2, 0.8))
+)
+
+composite_data <- trial_data |>
+  mutate(week_12_composite = ifelse(discontinued, NA_real_, week_12))
+
+results <- tibble(
+  Strategy = c("Treatment Policy", "While on Treatment", "Composite (discontinued = missing)"),
+  N = c(
+    sum(trial_data$arm == "Treatment"),
+    sum(trial_data$arm == "Treatment" & !trial_data$discontinued),
+    sum(trial_data$arm == "Treatment")
+  ),
+  Mean_change = c(
+    mean(trial_data$week_12[trial_data$arm == "Treatment"]),
+    mean(trial_data$week_12[trial_data$arm == "Treatment" & !trial_data$discontinued]),
+    mean(composite_data$week_12_composite[composite_data$arm == "Treatment"], na.rm = TRUE)
+  )
+)
+
+kable(results, digits = 3,
+      caption = "Mean week-12 change by ICE handling strategy (treatment arm)")
+```
+
+```{r}
+#| label: ice-plot
+#| fig-cap: "Same data, different estimand — different estimate"
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(results, aes(x = Strategy, y = Mean_change, fill = Strategy)) +
+  geom_col(width = 0.5, alpha = 0.85) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  scale_fill_manual(values = c("#2E86AB", "#A23B72", "#F18F01")) +
+  labs(
+    title = "Estimated treatment effect varies by ICE handling strategy",
+    x = NULL,
+    y = "Mean change at week 12",
+    caption = "Illustrates why pre-specifying the estimand matters"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold"))
+```
+
+---
+
+## Notes
+
+- The distinction between estimand (what) and estimator (how) is important.
+  MMRM, multiple imputation, and last observation carried forward are all
+  *estimators* — they answer different estimands even when applied to the same data.
+- The choice of ICE strategy should be driven by the clinical question, not
+  by what is computationally convenient.
+- Sensitivity analyses assess how robust conclusions are to the choice of
+  estimand and its underlying assumptions.
+
+---
+
+## References
+
+- ICH E9(R1) Addendum on Estimands and Sensitivity Analysis in Clinical Trials (2019)
+- Lawrance et al. (2020). *What is an estimand & how does it relate to quantifying
+  the effect of treatment on patient-relevant outcomes?*
+  Therapeutic Innovation & Regulatory Science.
+- Mallinckrodt et al. (2020). *Estimands: Four Essential Questions.*
+  Pharmaceutical Statistics.

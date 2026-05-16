@@ -1,0 +1,11 @@
+_site/
+_freeze/
+.quarto/
+*.html
+*.pdf
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+.DS_Store
+Thumbs.db
