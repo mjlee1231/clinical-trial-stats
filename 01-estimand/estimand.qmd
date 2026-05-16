@@ -231,6 +231,52 @@ ggplot(results, aes(x = Strategy, y = Mean_change, fill = Strategy)) +
 
 ---
 
+## Glossary
+
+**Estimand**
+: The precise quantity that a clinical trial is designed to estimate. Defined by four
+components: population, variable, intercurrent event strategy, and population-level summary.
+
+**Estimator**
+: The statistical method used to estimate the estimand (e.g., MMRM, multiple imputation).
+Different estimators can be applied to the same estimand, and the same estimator can
+be used to answer different estimands.
+
+**Estimate**
+: The numerical result produced by applying an estimator to the observed data (e.g., −1.2 units).
+
+**Hazard Ratio (HR)**
+: A measure of treatment effect used in time-to-event analyses. Defined as the ratio
+of the hazard rate in the treatment arm to the hazard rate in the control arm.
+HR < 1 indicates lower risk of the event in the treatment group. Covered in detail in 02-survival-analysis.
+
+**Intent-to-Treat (ITT)**
+: The principle of analyzing all randomized patients in the group they were assigned to,
+regardless of whether they actually received the treatment or complied with the protocol.
+Reflects real-world effectiveness rather than ideal efficacy.
+
+**Full Analysis Set (FAS)**
+: The modern implementation of the ITT principle. Includes all randomized patients
+who received at least one dose of study treatment.
+
+**Per-Protocol (PP)**
+: An analysis population restricted to patients who followed the protocol as planned,
+without major deviations. Reflects efficacy under ideal conditions.
+
+**Intercurrent Event (ICE)**
+: Any post-randomization event that affects the interpretation or existence of the
+endpoint measurement (e.g., treatment discontinuation, rescue medication use, death).
+
+**Randomization**
+: The process of randomly assigning participants to treatment or control arms.
+Ensures comparability between groups and is the basis for causal inference in clinical trials.
+
+**Effectiveness vs. Efficacy**
+: Effectiveness refers to how well a treatment works in real-world conditions (ITT/FAS).
+Efficacy refers to how well it works under ideal, controlled conditions (PP).
+
+---
+
 ## References
 
 - ICH E9(R1) Addendum on Estimands and Sensitivity Analysis in Clinical Trials (2019)
