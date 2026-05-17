@@ -1,0 +1,379 @@
+---
+title: "02. Survival Analysis"
+subtitle: "Time-to-Event Methods in Clinical Trials"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+Survival analysis is a class of statistical methods for analyzing the time until
+an event of interest occurs. Despite the name, the "event" does not have to be
+death — it can be disease progression, hospitalization, relapse, or any
+clinically meaningful endpoint.
+
+| Method | Purpose |
+|--------|---------|
+| Kaplan-Meier (KM) estimator | Non-parametric estimate of the survival function |
+| Log-rank test | Compare survival curves between two or more groups |
+| Cox proportional hazards model | Estimate the effect of covariates on survival |
+
+---
+
+## 1. Key Concepts
+
+### 1.1 Time-to-Event
+
+The outcome in survival analysis has two components:
+
+- **Time**: duration from a defined starting point (e.g., randomization) to the event
+- **Event indicator**: whether the event was observed (1) or the observation was censored (0)
+
+```r
+Surv(time, event)   # the basic survival object in R
+```
+
+### 1.2 Censoring
+
+Censoring occurs when the event has not been observed by the end of the study.
+This is not missing data — it is partial information. The patient was event-free
+up to their last observed time point.
+
+**Types of censoring:**
+
+| Type | Definition | Example |
+|------|-----------|---------|
+| **Right censoring** | Event has not occurred by end of follow-up | Patient still alive at study end |
+| **Left censoring** | Event occurred before the observation started | Rarely encountered in trials |
+| **Interval censoring** | Event occurred within a known time window | Detected at a scheduled visit |
+
+Right censoring is by far the most common in clinical trials.
+
+**Reasons for right censoring:**
+
+- Study ended before the patient experienced the event
+- Patient withdrew consent
+- Patient was lost to follow-up
+
+::: {.callout-warning}
+A key assumption is that censoring is **non-informative** — the reason a patient
+is censored is unrelated to their prognosis. If sicker patients are more likely
+to drop out, this assumption is violated and results may be biased.
+:::
+
+### 1.3 Hazard and Hazard Ratio
+
+The **hazard** is the instantaneous rate of the event occurring at time t,
+given that the patient has survived up to time t.
+
+```
+h(t) = lim  P(t ≤ T < t + Δt | T ≥ t) / Δt
+       Δt→0
+```
+
+The **Hazard Ratio (HR)** compares the hazard between two groups:
+
+```
+HR = h_treatment(t) / h_control(t)
+
+HR < 1  →  lower risk of event in treatment group (favorable)
+HR = 1  →  no difference between groups
+HR > 1  →  higher risk of event in treatment group
+```
+
+---
+
+## 2. Kaplan-Meier Estimator
+
+The KM estimator is a non-parametric method for estimating the survival function
+S(t) = P(T > t) — the probability of surviving beyond time t.
+
+### How it works
+
+At each event time, the survival probability is updated:
+
+```
+S(t) = ∏ (1 - d_i / n_i)
+
+where:
+  d_i = number of events at time t_i
+  n_i = number of patients at risk just before t_i
+```
+
+### Properties
+
+- Makes no assumptions about the shape of the survival distribution
+- Handles censoring naturally — censored patients are removed from the risk set
+  at their censoring time
+- Produces a step function that drops at each observed event time
+
+---
+
+## 3. Log-Rank Test
+
+The log-rank test is the standard non-parametric test for comparing survival
+curves between two or more groups. It tests the null hypothesis that the
+survival functions are identical across groups.
+
+### How it works
+
+At each event time, the test compares observed vs. expected number of events
+in each group, summed across all event times.
+
+### When the log-rank test is NOT appropriate
+
+- When the **proportional hazards assumption is violated** — i.e., when the
+  hazard ratio is not constant over time (e.g., survival curves cross)
+- When there are **time-varying treatment effects**
+- When comparing more than two groups without adjustment for multiplicity
+
+In these cases, alternatives include the **weighted log-rank test**
+(e.g., Fleming-Harrington) or **restricted mean survival time (RMST)**.
+
+---
+
+## 4. Cox Proportional Hazards Model
+
+The Cox model is a semi-parametric regression model that estimates the effect
+of covariates on the hazard function:
+
+```
+h(t | X) = h_0(t) · exp(β_1 X_1 + β_2 X_2 + ... + β_p X_p)
+
+where:
+  h_0(t) = baseline hazard (unspecified — this is the non-parametric part)
+  exp(β)  = hazard ratio for a one-unit increase in X
+```
+
+### Why "semi-parametric"?
+
+- The baseline hazard h_0(t) is left completely unspecified (non-parametric)
+- The covariate effects are modeled parametrically via exp(Xβ)
+- This makes the Cox model very flexible — no distributional assumption needed
+
+### 4.1 The Proportional Hazards Assumption
+
+The key assumption of the Cox model is that the hazard ratio between any two
+patients is **constant over time**. This means the survival curves should not cross.
+
+**How to verify the PH assumption:**
+
+| Method | How |
+|--------|-----|
+| **Schoenfeld residuals** | Plot residuals vs. time — should show no trend |
+| **cox.zph() in R** | Formal test; p < 0.05 suggests violation |
+| **Log-log plot** | Plot log(-log(S(t))) vs. log(t) — lines should be parallel |
+| **Visual inspection** | KM curves should not cross |
+
+**What to do if PH assumption is violated:**
+
+- Use **time-varying coefficients** in the Cox model
+- Use **stratified Cox model** (stratify by the violating variable)
+- Switch to **RMST** (restricted mean survival time) as the summary measure
+- Use **accelerated failure time (AFT)** models
+
+---
+
+## 5. Competing Risks
+
+Competing risks arise when patients can experience multiple types of events,
+and the occurrence of one event prevents or alters the probability of the other.
+
+**Example:** In a cancer trial measuring time to disease progression:
+- Disease progression is the event of interest
+- Death without progression is a competing risk
+
+Using standard KM in the presence of competing risks **overestimates** the
+cumulative incidence of the event of interest, because it treats competing
+events as censored observations.
+
+**Solution:** Use the **cause-specific hazard** or the
+**cumulative incidence function (CIF)** via the Fine-Gray model.
+
+---
+
+## 6. R Code
+
+```{r}
+#| label: setup
+library(survival)
+library(survminer)
+library(dplyr)
+library(ggplot2)
+```
+
+### 6.1 Simulating Trial Data
+
+```{r}
+#| label: simulate-data
+
+set.seed(42)
+n <- 200
+
+trial_data <- tibble(
+  id        = 1:n,
+  arm       = rep(c("Treatment", "Placebo"), each = n / 2),
+  time      = rexp(n, rate = ifelse(rep(c("Treatment", "Placebo"), each = n/2) == "Treatment", 0.05, 0.08)),
+  event     = rbinom(n, 1, prob = 0.75),
+  age       = rnorm(n, mean = 60, sd = 10),
+  sex       = sample(c("M", "F"), n, replace = TRUE)
+) |>
+  mutate(time = pmin(time, 24))  # administrative censoring at 24 months
+```
+
+### 6.2 Kaplan-Meier Curve
+
+```{r}
+#| label: km-plot
+#| fig-cap: "Kaplan-Meier survival curves by treatment arm"
+#| fig-width: 8
+#| fig-height: 5
+
+km_fit <- survfit(Surv(time, event) ~ arm, data = trial_data)
+
+ggsurvplot(
+  km_fit,
+  data          = trial_data,
+  pval          = TRUE,
+  conf.int      = TRUE,
+  risk.table    = TRUE,
+  legend.labs   = c("Placebo", "Treatment"),
+  palette       = c("#E7B800", "#2E86AB"),
+  xlab          = "Time (months)",
+  ylab          = "Survival probability",
+  title         = "Kaplan-Meier Survival Curves",
+  ggtheme       = theme_minimal()
+)
+```
+
+### 6.3 Log-Rank Test
+
+```{r}
+#| label: log-rank
+
+logrank_test <- survdiff(Surv(time, event) ~ arm, data = trial_data)
+print(logrank_test)
+```
+
+### 6.4 Cox Proportional Hazards Model
+
+```{r}
+#| label: cox-model
+
+cox_fit <- coxph(Surv(time, event) ~ arm + age + sex, data = trial_data)
+summary(cox_fit)
+```
+
+### 6.5 Checking the Proportional Hazards Assumption
+
+```{r}
+#| label: ph-assumption
+#| fig-cap: "Schoenfeld residuals — no trend indicates PH assumption holds"
+#| fig-width: 8
+#| fig-height: 5
+
+ph_test <- cox.zph(cox_fit)
+print(ph_test)   # p > 0.05 → no evidence of PH violation
+
+ggcoxzph(ph_test)
+```
+
+### 6.6 Log-Log Plot
+
+```{r}
+#| label: log-log-plot
+#| fig-cap: "Log-log plot — parallel lines indicate proportional hazards"
+#| fig-width: 7
+#| fig-height: 5
+
+plot(
+  km_fit,
+  fun     = "cloglog",
+  col     = c("#E7B800", "#2E86AB"),
+  xlab    = "log(Time)",
+  ylab    = "log(-log(S(t)))",
+  main    = "Log-Log Plot for PH Assumption Check"
+)
+legend("topleft", legend = c("Placebo", "Treatment"),
+       col = c("#E7B800", "#2E86AB"), lty = 1)
+```
+
+---
+
+## Notes
+
+- The KM estimator is descriptive — it estimates the survival function but does
+  not test hypotheses or adjust for covariates.
+- The log-rank test is the default test for comparing survival curves, but it
+  has low power when the PH assumption is violated or when treatment effects
+  emerge late (e.g., immunotherapy trials).
+- The Cox model is the workhorse of survival analysis in clinical trials. It
+  gives adjusted hazard ratios while making minimal distributional assumptions.
+- Always check the PH assumption before interpreting Cox model results.
+  A significant cox.zph() test (p < 0.05) warrants further investigation.
+
+---
+
+## Glossary
+
+**Survival function S(t)**
+: The probability that the event of interest has not occurred by time t.
+Ranges from 1 (at t = 0) to 0 (as t → ∞).
+
+**Hazard function h(t)**
+: The instantaneous rate of the event occurring at time t, given survival up to t.
+Intuitively, the "risk" of the event at a given moment.
+
+**Hazard Ratio (HR)**
+: The ratio of hazard rates between two groups. The primary effect measure in
+Cox regression. HR = 0.7 means the treatment group has 30% lower risk of the
+event at any point in time (under the PH assumption).
+
+**Censoring**
+: Incomplete observation of the event time. A censored patient was event-free
+up to their last contact. Not the same as missing data.
+
+**Kaplan-Meier (KM) estimator**
+: A non-parametric estimator of the survival function. Makes no assumptions
+about the underlying distribution of event times.
+
+**Log-rank test**
+: A non-parametric test for comparing survival curves. Most powerful when the
+hazard ratio is constant over time (PH assumption holds).
+
+**Cox proportional hazards model**
+: A semi-parametric regression model relating covariates to the hazard function.
+The most widely used survival model in clinical trials.
+
+**Proportional hazards (PH) assumption**
+: The assumption that the hazard ratio between groups is constant over time.
+Required for valid interpretation of Cox model coefficients.
+
+**Competing risks**
+: A situation where multiple event types exist and the occurrence of one
+prevents or modifies the probability of another.
+
+**Restricted Mean Survival Time (RMST)**
+: The expected event-free survival time up to a pre-specified time horizon.
+A useful alternative to HR when the PH assumption is violated.
+
+---
+
+## References
+
+- Cox, D.R. (1972). *Regression models and life tables.* Journal of the Royal
+  Statistical Society, Series B.
+- Kaplan, E.L. & Meier, P. (1958). *Nonparametric estimation from incomplete
+  observations.* Journal of the American Statistical Association.
+- Therneau, T. & Grambsch, P. (2000). *Modeling Survival Data: Extending the
+  Cox Model.* Springer.
+- Royston, P. & Parmar, M.K.B. (2011). *The use of restricted mean survival time
+  to estimate the treatment effect in randomized clinical trials when the
+  proportional hazards assumption is in doubt.* Statistics in Medicine.
