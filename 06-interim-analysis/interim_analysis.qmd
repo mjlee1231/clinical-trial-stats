@@ -1,0 +1,195 @@
+---
+title: "06. Interim Analysis"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. What is Interim Analysis?
+
+An interim analysis is a pre-planned examination of accumulating trial data **before the final analysis**. It allows a trial to be stopped early for:
+
+- **Efficacy**: The treatment effect is already convincing
+- **Futility**: The treatment is unlikely to succeed even if continued
+- **Safety**: Unacceptable harm is observed
+
+Because interim looks at the data inflate type I error, special statistical methods are needed to maintain the overall $\alpha$ level.
+
+---
+
+## 2. The Multiple Looks Problem
+
+If you test at $\alpha = 0.05$ at both an interim and final analysis, the true FWER is not 0.05. Under the null hypothesis, testing twice inflates error:
+
+$$P(\text{reject at least once} \mid H_0) > \alpha$$
+
+The solution is to **spend** $\alpha$ carefully across looks.
+
+---
+
+## 3. Alpha Spending Functions
+
+The **alpha spending function** $\alpha^*(t)$ determines how much type I error to spend at information fraction $t \in [0, 1]$, where $t = 1$ is the final analysis.
+
+Requirements:
+- $\alpha^*(0) = 0$
+- $\alpha^*(1) = \alpha$
+- $\alpha^*(t)$ is non-decreasing
+
+### O'Brien-Fleming (OBF)
+
+Spends very little $\alpha$ early — requires a very strong effect to stop early.
+
+$$\alpha^*_\text{OBF}(t) = 2\left(1 - \Phi\left(\frac{z_{\alpha/2}}{\sqrt{t}}\right)\right)$$
+
+- Conservative early stopping boundary
+- Most commonly used in confirmatory trials
+
+### Pocock
+
+Spends $\alpha$ evenly across looks — easier to stop early but reduces power at the final analysis.
+
+- Less popular in confirmatory settings
+
+### Lan-DeMets
+
+Generalizes OBF and Pocock as continuous functions of information fraction $t$. Does not require pre-specifying the number or timing of interim looks in advance.
+
+---
+
+## 4. Boundaries
+
+At each interim look $k$, the test statistic $Z_k$ is compared to a boundary $c_k$:
+
+- **Efficacy boundary**: Stop and reject $H_0$ if $Z_k \geq c_k$
+- **Futility boundary**: Stop and fail to reject if $Z_k \leq f_k$ (binding or non-binding)
+
+Non-binding futility boundaries do not affect the type I error calculation — the trial can continue past them without penalty.
+
+---
+
+## 5. DSMB (Data Safety Monitoring Board)
+
+A DSMB (or IDMC) is an **independent committee** that reviews unblinded interim data and recommends whether to continue, modify, or stop the trial. Key features:
+
+- Members are independent from the sponsor
+- Operates under a **charter** that pre-specifies the monitoring plan
+- Maintains blinding of the sponsor team
+- Makes recommendations; the sponsor makes the final decision
+
+The statistical team prepares a **closed report** (unblinded) for the DSMB and an **open report** (blinded) for the sponsor.
+
+---
+
+## 6. Conditional Power and Futility
+
+**Conditional power** is the probability of achieving a significant result at the final analysis, given current data and assuming the original treatment effect.
+
+$$\text{CP}(t) = P\left(Z_\text{final} \geq c_\text{final} \mid Z_t, \delta = \hat{\delta}\right)$$
+
+If conditional power drops below a threshold (e.g., 20%), the trial may be stopped for futility.
+
+---
+
+## 7. R Code Practice
+
+```{r}
+# install.packages("gsDesign")
+library(gsDesign)
+library(ggplot2)
+```
+
+```{r}
+# --- Two-look group sequential design ---
+# 1 interim + 1 final, O'Brien-Fleming spending, one-sided alpha = 0.025
+
+gs_design <- gsDesign(
+  k      = 2,          # Number of analyses (1 interim + 1 final)
+  test.type = 1,       # One-sided
+  alpha  = 0.025,
+  beta   = 0.1,        # 90% power
+  sfu    = sfLDOF,     # Lan-DeMets O'Brien-Fleming spending
+  delta  = 1           # Standardized effect size (will be normalized)
+)
+
+summary(gs_design)
+```
+
+```{r}
+# Plot the design: efficacy and futility boundaries
+plot(gs_design, main = "Group Sequential Design: OBF Spending")
+```
+
+```{r}
+# --- Three-look design with futility ---
+gs3 <- gsDesign(
+  k         = 3,
+  test.type = 4,       # Two-sided with non-binding futility
+  alpha     = 0.025,
+  beta      = 0.1,
+  sfu       = sfLDOF,
+  sfl       = sfLDPocock,  # Futility spending
+  delta     = 1
+)
+
+summary(gs3)
+plot(gs3)
+```
+
+```{r}
+# --- Alpha spending: compare OBF vs. Pocock ---
+t_vals <- seq(0, 1, by = 0.01)
+
+obf     <- sfLDOF(alpha = 0.025, t = t_vals)$spend
+pocock  <- sfLDPocock(alpha = 0.025, t = t_vals)$spend
+
+spend_df <- data.frame(
+  t       = rep(t_vals, 2),
+  spend   = c(obf, pocock),
+  method  = rep(c("OBF", "Pocock"), each = length(t_vals))
+)
+
+ggplot(spend_df, aes(x = t, y = spend, color = method)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Alpha Spending Functions",
+    x = "Information Fraction (t)",
+    y = "Cumulative Alpha Spent",
+    color = "Method"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# --- Conditional power calculation ---
+# Assume: z-statistic at interim = 1.8, information fraction = 0.5
+# Original target effect: delta = 0.3 (on standardized scale)
+
+z_interim   <- 1.8
+t_interim   <- 0.5
+z_final_crit <- 1.96  # Two-sided 0.05 (or OBF boundary at final)
+
+# Conditional power (assuming original effect holds)
+# Z_final | Z_t ~ N(z_interim + delta * sqrt(1 - t), 1) approximately
+delta_std <- 0.3
+z_cp <- (z_final_crit - z_interim - delta_std * sqrt(1 - t_interim)) /
+        sqrt(1 - t_interim)
+
+cp <- 1 - pnorm(z_cp)
+cat(sprintf("Conditional power: %.1f%%\n", cp * 100))
+```
+
+---
+
+## 8. Key References
+
+- Lan, K.K.G. & DeMets, D.L. (1983). Discrete sequential boundaries for clinical trials. *Biometrika*.
+- Jennison, C. & Turnbull, B.W. (2000). *Group Sequential Methods with Applications to Clinical Trials*. CRC Press.
+- [FDA Guidance on Adaptive Design (2019)](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/adaptive-designs-clinical-trials-drugs-and-biologics)
+- `gsDesign` R package: <https://cran.r-project.org/package=gsDesign>

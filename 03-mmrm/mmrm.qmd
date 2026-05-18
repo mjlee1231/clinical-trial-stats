@@ -1,0 +1,140 @@
+---
+title: "03. MMRM (Mixed Model for Repeated Measures)"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. What is MMRM?
+
+MMRM (Mixed Model for Repeated Measures) is the standard approach for analyzing **longitudinal continuous outcomes** in clinical trials. It models all post-baseline measurements jointly, accounting for within-subject correlation across visits.
+
+The model is:
+
+$$Y_{ij} = \mathbf{x}_{ij}^\top \boldsymbol{\beta} + \varepsilon_{ij}$$
+
+where $\boldsymbol{\varepsilon}_i \sim \mathcal{N}(\mathbf{0}, \boldsymbol{\Sigma})$ and $\boldsymbol{\Sigma}$ is typically an unstructured covariance matrix across visits.
+
+Key points:
+
+- **No random effects** — this is a marginal (population-averaged) model
+- **Unstructured covariance** is the default — no assumption on how correlations decay over time
+- **Valid under MAR** — missing data due to dropout is handled without explicit imputation
+- Primary target: **treatment difference at the final visit**
+
+---
+
+## 2. MMRM vs. ANCOVA
+
+| Feature | ANCOVA | MMRM |
+|---|---|---|
+| Data used | Last visit only (often with LOCF) | All post-baseline visits |
+| Dropout handling | Requires imputation | Valid under MAR |
+| Statistical efficiency | Lower | Higher |
+| Regulatory trend | Older standard | Current preference |
+
+ANCOVA on observed completers or LOCF-imputed data is biased under MAR. MMRM avoids this by using all available data within a likelihood-based framework.
+
+---
+
+## 3. Covariance Structures
+
+| Structure | Description | Notes |
+|---|---|---|
+| Unstructured (UN) | All entries free | Default; most flexible |
+| Compound symmetry (CS) | Equal variance, equal correlation | Assumes exchangeable visits |
+| AR(1) | Correlation decays exponentially with lag | Evenly spaced visits |
+| Toeplitz | Correlation depends only on lag | More flexible than AR(1) |
+
+For confirmatory trials, **unstructured** is preferred to avoid misspecification. Simpler structures are used when convergence fails or sample sizes are very small.
+
+---
+
+## 4. Connection to Estimands (ICH E9(R1))
+
+MMRM naturally aligns with:
+
+- **Treatment policy strategy**: uses data from patients who discontinue treatment (if collected post-discontinuation)
+- **Hypothetical strategy**: models the outcome as if treatment continued
+
+The estimand must be specified first — then the model is chosen to target it.
+
+---
+
+## 5. R Code Practice
+
+```{r}
+# Install if needed:
+# install.packages(c("mmrm", "dplyr", "ggplot2"))
+
+library(mmrm)
+library(dplyr)
+library(ggplot2)
+
+# Use the built-in fev_data from mmrm package
+# Outcome: FEV1 (lung function), Treatment: TRT (active vs. placebo)
+# Visits: AVISIT, Subject: USUBJID, Baseline: BASE
+
+data(fev_data, package = "mmrm")
+head(fev_data)
+```
+
+```{r}
+# Fit MMRM with unstructured covariance
+# FEV1 ~ treatment * visit + baseline + (unstructured by visit | subject)
+
+fit <- mmrm(
+  formula = FEV1 ~ RACE + SEX + ARMCD * AVISIT + us(AVISIT | USUBJID),
+  data = fev_data
+)
+
+summary(fit)
+```
+
+```{r}
+# Extract treatment contrasts at each visit
+library(emmeans)
+
+emm <- emmeans(fit, ~ ARMCD | AVISIT)
+contrast(emm, method = "pairwise")
+```
+
+```{r}
+# Plot observed means by treatment group and visit
+fev_data |>
+  group_by(ARMCD, AVISIT) |>
+  summarise(mean_fev = mean(FEV1, na.rm = TRUE), .groups = "drop") |>
+  ggplot(aes(x = AVISIT, y = mean_fev, color = ARMCD, group = ARMCD)) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    title = "Observed Mean FEV1 by Visit and Treatment",
+    x = "Visit", y = "Mean FEV1", color = "Treatment"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Compare covariance structures: unstructured vs. AR(1)
+fit_ar1 <- mmrm(
+  formula = FEV1 ~ RACE + SEX + ARMCD * AVISIT + ar1(AVISIT | USUBJID),
+  data = fev_data
+)
+
+# AIC comparison
+AIC(fit, fit_ar1)
+```
+
+---
+
+## 6. Key References
+
+- [ICH E9(R1) Addendum on Estimands](https://www.ich.org/page/efficacy-guidelines)
+- Mallinckrodt et al. (2008). *Recommendations for the Primary Analysis of Continuous Endpoints in Longitudinal Clinical Trials*. Drug Information Journal.
+- `mmrm` R package documentation: <https://openpharma.github.io/mmrm/>

@@ -1,0 +1,185 @@
+---
+title: "05. Multiple Testing"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Why Multiple Testing Matters
+
+When multiple hypotheses are tested simultaneously, the chance of at least one false positive (type I error) inflates. In clinical trials, this is a serious regulatory concern because an incorrectly approved drug causes real harm.
+
+If each of $m$ tests has type I error $\alpha$, the **familywise error rate (FWER)** under independence is:
+
+$$\text{FWER} = 1 - (1 - \alpha)^m$$
+
+For $m = 5$ and $\alpha = 0.05$: FWER $\approx 0.226$.
+
+---
+
+## 2. Error Rate Definitions
+
+| Rate | Definition | Typical use |
+|---|---|---|
+| FWER | $P(\text{at least one false positive})$ | Confirmatory trials (strict) |
+| FDR | Expected proportion of false positives among rejections | Exploratory, genomics |
+| Per-comparison error rate | $\alpha$ per individual test | Usually not acceptable in trials |
+
+Regulatory agencies (FDA, EMA) require **FWER control** at $\alpha = 0.025$ (one-sided) for confirmatory trials.
+
+---
+
+## 3. Common Procedures
+
+### Bonferroni
+
+Reject $H_i$ if $p_i \leq \alpha / m$.
+
+- Simple, conservative
+- Does not use correlation structure among tests
+
+### Holm (step-down Bonferroni)
+
+Order p-values: $p_{(1)} \leq p_{(2)} \leq \cdots \leq p_{(m)}$.  
+Reject $H_{(i)}$ if $p_{(j)} \leq \alpha / (m - j + 1)$ for all $j \leq i$.
+
+- Uniformly more powerful than Bonferroni
+- Still controls FWER strongly
+
+### Hochberg (step-up)
+
+Start from the largest p-value. Reject $H_{(i)}$ and all smaller if $p_{(i)} \leq \alpha / (m - i + 1)$.
+
+- More powerful than Holm under positive dependence
+- Requires positive correlation assumption (often satisfied in trials)
+
+### Benjamini-Hochberg (FDR)
+
+Order p-values and reject $H_{(i)}$ if $p_{(i)} \leq \frac{i}{m} \alpha$.
+
+- Controls FDR, not FWER
+- Used in exploratory settings, not confirmatory trials
+
+---
+
+## 4. Hierarchical Testing (Fixed Sequence)
+
+A common and simple approach in confirmatory trials: pre-specify a **testing sequence** based on clinical importance. Test in order; proceed to the next hypothesis only if the current one is rejected.
+
+$$H_1 \to H_2 \to H_3$$
+
+- Full $\alpha$ is available at each step
+- No $\alpha$ penalty as long as the sequence is pre-specified
+- Example: primary endpoint → key secondary → supportive secondary
+
+---
+
+## 5. Graphical Approach (Bretz et al.)
+
+The graphical approach (implemented in `gMCP`) generalizes the weighted Bonferroni procedure. Each hypothesis $H_i$ is assigned:
+
+- An initial weight $w_i$ (proportion of $\alpha$)
+- Transition weights $g_{ij}$ (how $\alpha$ flows if $H_i$ is rejected)
+
+When $H_i$ is rejected, its $\alpha$ is redistributed to remaining hypotheses according to $g_{ij}$. This allows flexible, transparent multiplicity strategies that are easy to communicate and pre-specify in SAPs.
+
+---
+
+## 6. R Code Practice
+
+```{r}
+# install.packages(c("gMCP", "ggplot2"))
+library(gMCP)
+library(ggplot2)
+```
+
+```{r}
+# --- Simple procedures ---
+
+# Simulated p-values from 5 tests
+p_vals <- c(0.012, 0.048, 0.021, 0.091, 0.003)
+names(p_vals) <- paste0("H", 1:5)
+
+# Bonferroni
+p.adjust(p_vals, method = "bonferroni")
+
+# Holm
+p.adjust(p_vals, method = "holm")
+
+# Hochberg
+p.adjust(p_vals, method = "hochberg")
+
+# Benjamini-Hochberg (FDR)
+p.adjust(p_vals, method = "BH")
+```
+
+```{r}
+# --- Fixed sequence testing ---
+# Pre-specified order: H1 -> H2 -> H3
+alpha <- 0.025
+p_seq <- c(H1 = 0.010, H2 = 0.032, H3 = 0.008)
+
+rejected <- logical(length(p_seq))
+for (i in seq_along(p_seq)) {
+  if (p_seq[i] <= alpha) {
+    rejected[i] <- TRUE
+  } else {
+    break  # Stop at first non-rejection
+  }
+}
+
+data.frame(
+  Hypothesis = names(p_seq),
+  p_value    = p_seq,
+  Rejected   = rejected
+)
+```
+
+```{r}
+# --- Graphical approach with gMCP ---
+# Two primary endpoints (H1, H2) and two secondary (H3, H4)
+# Split alpha equally between H1 and H2
+# If H1 rejected -> alpha flows to H3; if H2 -> H4; H3/H4 -> each other
+
+m <- matrix(0, nrow = 4, ncol = 4,
+            dimnames = list(paste0("H", 1:4), paste0("H", 1:4)))
+
+# Transition weights (where alpha goes after rejection)
+m["H1", "H3"] <- 1     # H1 -> H3
+m["H2", "H4"] <- 1     # H2 -> H4
+m["H3", "H4"] <- 0.5   # H3 -> H4 (half)
+m["H3", "H2"] <- 0.5   # H3 -> H2 (half)
+m["H4", "H3"] <- 0.5
+m["H4", "H1"] <- 0.5
+
+# Initial alpha weights
+weights <- c(H1 = 0.5, H2 = 0.5, H3 = 0, H4 = 0)
+
+graph <- new("graphMCP",
+             m = m,
+             weights = weights)
+
+plot(graph, main = "Multiplicity Graph")
+```
+
+```{r}
+# Apply the graph to p-values
+p_test <- c(H1 = 0.010, H2 = 0.040, H3 = 0.018, H4 = 0.060)
+
+result <- gMCP(graph, pvalues = p_test, alpha = 0.025)
+result
+```
+
+---
+
+## 7. Key References
+
+- Bretz, F., Hothorn, T., & Westfall, P. (2010). *Multiple Comparisons Using R*. CRC Press.
+- [FDA Guidance on Multiple Endpoints (2022)](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/multiple-endpoints-clinical-trials-guidance-industry)
+- `gMCP` R package: <https://cran.r-project.org/package=gMCP>

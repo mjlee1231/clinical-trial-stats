@@ -1,0 +1,210 @@
+---
+title: "08. Regulatory & Documentation"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Key ICH Guidelines
+
+The International Council for Harmonisation (ICH) guidelines define the regulatory framework for clinical trials across the US, EU, and Japan.
+
+| Guideline | Topic | Key Points |
+|---|---|---|
+| ICH E3 | Clinical Study Report (CSR) | Structure and content of the final trial report |
+| ICH E6(R2) | Good Clinical Practice (GCP) | Conduct, documentation, monitoring of trials |
+| ICH E8 | General Considerations for Clinical Studies | Overall trial design principles |
+| ICH E9 | Statistical Principles for Clinical Trials | Primary/secondary endpoints, analysis sets, multiplicity |
+| ICH E9(R1) | Estimand Addendum | Estimand framework, intercurrent events |
+| ICH E10 | Choice of Control Group | Placebo, active control, NI margins |
+
+---
+
+## 2. Statistical Analysis Plan (SAP)
+
+The SAP is a pre-specified document that describes **exactly how the data will be analyzed** before the blind is broken. It supplements the protocol and is required for regulatory submissions.
+
+### SAP Contents
+
+- **Analysis populations**: FAS, PP, safety set — definitions and handling of deviations
+- **Primary analysis**: exact model, covariates, estimand, handling of missing data
+- **Secondary analyses**: listed in testing hierarchy
+- **Multiplicity strategy**: testing procedure, graphical approach
+- **Subgroup analyses**: pre-specified vs. exploratory
+- **Sensitivity analyses**: alternative models, MNAR scenarios
+- **Tables, Listings, Figures (TLFs)**: mock shells pre-specified
+
+### Timeline
+
+| Milestone | SAP Status |
+|---|---|
+| Protocol finalized | Draft SAP begins |
+| Database lock imminent | SAP must be finalized and signed |
+| After unblinding | SAP amendments require justification |
+
+The SAP must be **finalized before unblinding**. Any post-unblinding changes must be fully disclosed.
+
+---
+
+## 3. Analysis Populations
+
+| Set | Definition | Used for |
+|---|---|---|
+| ITT (Intent-to-Treat) | All randomized patients | Principle, not always primary |
+| FAS (Full Analysis Set) | All randomized, received ≥1 dose, ≥1 post-baseline measurement | Primary efficacy |
+| PP (Per-Protocol) | Completed trial without major deviations | Sensitivity analysis |
+| Safety Set | All who received ≥1 dose | Safety analyses |
+| mITT | Subset of ITT after removing patients with data quality issues | Sometimes used as primary |
+
+---
+
+## 4. CDISC Standards
+
+CDISC (Clinical Data Interchange Standards Consortium) provides standardized data formats required for FDA submissions.
+
+### SDTM (Study Data Tabulation Model)
+
+Raw collected data, organized by domain:
+
+| Domain | Content |
+|---|---|
+| DM | Demographics |
+| AE | Adverse events |
+| LB | Laboratory results |
+| VS | Vital signs |
+| CM | Concomitant medications |
+| EX | Exposure (dosing) |
+
+### ADaM (Analysis Data Model)
+
+Derived analysis-ready datasets:
+
+| Dataset | Content |
+|---|---|
+| ADSL | Subject-level baseline and treatment info |
+| ADTTE | Time-to-event analysis data |
+| ADLB | Analysis laboratory data |
+| ADAE | Analysis adverse event data |
+| ADEFF | Efficacy analysis data (trial-specific) |
+
+Key ADaM variables:
+
+- `PARAMCD` / `PARAM`: parameter code and label
+- `AVAL`: analysis value
+- `BASE`: baseline value
+- `CHG` / `PCHG`: change / percent change from baseline
+- `ANL01FL`: analysis flag (which records to include in primary analysis)
+
+---
+
+## 5. Clinical Study Report (ICH E3)
+
+The CSR is the comprehensive report submitted to regulators after trial completion. Key sections:
+
+| Section | Content |
+|---|---|
+| Synopsis | One-page summary of objectives, design, results |
+| Introduction | Background and rationale |
+| Study objectives | Primary and secondary endpoints, estimands |
+| Investigational plan | Design, randomization, blinding, dosing |
+| Study patients | Disposition, deviations, analysis populations |
+| Efficacy evaluation | Primary and secondary results, subgroups |
+| Safety evaluation | AEs, SAEs, labs, vital signs, deaths |
+| Statistical methods | Reference to SAP |
+| Discussion and conclusions | Interpretation |
+| Appendices | Protocol, SAP, informed consent, TLFs |
+
+---
+
+## 6. R Code Practice
+
+```{r}
+# install.packages(c("pharmaverseadam", "dplyr", "ggplot2", "gtsummary"))
+library(pharmaverseadam)
+library(dplyr)
+library(ggplot2)
+library(gtsummary)
+```
+
+```{r}
+# Load CDISC pilot ADSL dataset
+data(adsl)
+glimpse(adsl)
+```
+
+```{r}
+# Table 1: Baseline characteristics by treatment arm (SAP-style)
+adsl |>
+  select(TRT01P, AGE, SEX, RACE, BMIBL, WEIGHTBL) |>
+  tbl_summary(
+    by = TRT01P,
+    label = list(
+      AGE      ~ "Age (years)",
+      SEX      ~ "Sex",
+      RACE     ~ "Race",
+      BMIBL    ~ "BMI at baseline",
+      WEIGHTBL ~ "Weight at baseline (kg)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) |>
+  add_overall() |>
+  bold_labels()
+```
+
+```{r}
+# Analysis population flags: how many in FAS vs. PP?
+adsl |>
+  count(SAFFL, ITTFL, EFFFL) |>
+  arrange(desc(n))
+```
+
+```{r}
+# Load ADTTE for survival analysis on CDISC pilot data
+data(adtte)
+glimpse(adtte)
+
+# Event counts by treatment
+adtte |>
+  filter(PARAMCD == "TTDE") |>   # Time to first dermatological event
+  group_by(TRT01P) |>
+  summarise(
+    n_subjects = n(),
+    n_events   = sum(CNSR == 0),
+    event_rate = mean(CNSR == 0)
+  )
+```
+
+```{r}
+# Disposition summary (common in CSR Section 10)
+adsl |>
+  count(TRT01P, DCREASCD) |>
+  filter(!is.na(DCREASCD)) |>
+  ggplot(aes(x = DCREASCD, y = n, fill = TRT01P)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(
+    title  = "Reason for Discontinuation by Treatment Arm",
+    x      = NULL, y = "Number of Subjects",
+    fill   = "Treatment"
+  ) +
+  theme_minimal()
+```
+
+---
+
+## 7. Key References
+
+- [ICH E9 Statistical Principles](https://www.fda.gov/media/71336/download)
+- [ICH E9(R1) Estimand Addendum](https://www.ich.org/page/efficacy-guidelines)
+- [ICH E3 Clinical Study Report](https://www.ich.org/page/efficacy-guidelines)
+- [CDISC Standards](https://www.cdisc.org/standards)
+- `pharmaverseadam` R package: <https://cran.r-project.org/package=pharmaverseadam>

@@ -1,0 +1,199 @@
+---
+title: "07. Sample Size & Power"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Core Concepts
+
+### The Four Quantities
+
+Sample size and power calculations revolve around four inter-related quantities. Given any three, the fourth is determined:
+
+| Quantity | Symbol | Typical value |
+|---|---|---|
+| Type I error (significance level) | $\alpha$ | 0.025 (one-sided) |
+| Type II error | $\beta$ | 0.10 or 0.20 |
+| Power | $1 - \beta$ | 80% or 90% |
+| Effect size | $\delta$ | Clinically meaningful difference |
+
+---
+
+### Basic Formula (Two-Sample t-test)
+
+For comparing two means with equal group sizes $n$:
+
+$$n = \frac{(z_{1-\alpha} + z_{1-\beta})^2 \cdot 2\sigma^2}{\delta^2}$$
+
+where $\delta$ is the target difference and $\sigma$ is the standard deviation.
+
+---
+
+## 2. Key Inputs and Assumptions
+
+Getting the assumptions right is critical — a trial powered on wrong assumptions may be severely underpowered.
+
+| Input | Source | Notes |
+|---|---|---|
+| Effect size $\delta$ | Clinically meaningful difference | Not the "expected" effect — the minimum that matters |
+| SD $\sigma$ | Pilot studies, literature, historical data | Often the hardest to estimate |
+| Dropout rate | Historical data | Inflate $n$ accordingly |
+| $\alpha$ | Pre-specified (regulatory) | One-sided 0.025 is standard |
+| Power | Pre-specified | 80% minimum; 90% preferred |
+
+---
+
+## 3. Inflation for Dropout
+
+If dropout proportion is $d$, inflate the calculated $n$ by:
+
+$$n_\text{adj} = \frac{n}{1 - d}$$
+
+For example, with 20% expected dropout and $n = 100$ per arm: $n_\text{adj} = 100 / 0.8 = 125$ per arm.
+
+---
+
+## 4. Sample Size for Common Designs
+
+### Survival Endpoint (Log-rank Test)
+
+For survival trials, the required number of **events** (not subjects) is:
+
+$$E = \frac{4(z_{1-\alpha} + z_{1-\beta})^2}{[\log(\text{HR})]^2}$$
+
+Then sample size is derived from the expected event rate and follow-up time.
+
+### Non-inferiority Trial
+
+The margin $\Delta$ must be pre-specified. The sample size formula becomes:
+
+$$n = \frac{(z_{1-\alpha} + z_{1-\beta})^2 \cdot 2\sigma^2}{(\delta - \Delta)^2}$$
+
+where $\delta$ is the expected treatment difference and $\Delta$ is the NI margin.
+
+---
+
+## 5. Sample Size Re-estimation
+
+Blinded sample size re-estimation (SSR) allows adjustment of $n$ based on observed nuisance parameters (e.g., pooled variance) **without unblinding**. This is permitted by regulators if:
+
+- Pre-specified in the protocol/SAP
+- Based only on blinded information (not treatment effect)
+- Does not inflate type I error
+
+Unblinded SSR is more complex and requires alpha adjustment.
+
+---
+
+## 6. R Code Practice
+
+```{r}
+# install.packages(c("pwr", "gsDesign", "survival", "dplyr", "ggplot2"))
+library(pwr)
+library(gsDesign)
+library(ggplot2)
+```
+
+```{r}
+# --- Two-sample t-test ---
+# Target: detect difference of 5 units, SD = 12, alpha = 0.025 one-sided, power = 90%
+
+result_t <- pwr.t.test(
+  d     = 5 / 12,      # Cohen's d = delta / sigma
+  sig.level = 0.025,
+  power = 0.90,
+  type  = "two.sample",
+  alternative = "greater"
+)
+result_t
+
+cat(sprintf("Required n per arm: %d\n", ceiling(result_t$n)))
+```
+
+```{r}
+# --- Power curve: vary assumed SD ---
+sds     <- seq(8, 20, by = 0.5)
+n_per_arm <- sapply(sds, function(s) {
+  ceiling(pwr.t.test(d = 5 / s, sig.level = 0.025, power = 0.90,
+                     type = "two.sample", alternative = "greater")$n)
+})
+
+power_curve <- data.frame(sd = sds, n = n_per_arm)
+
+ggplot(power_curve, aes(x = sd, y = n)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_vline(xintercept = 12, linetype = "dashed", color = "red") +
+  labs(title = "Required Sample Size vs. Assumed SD",
+       subtitle = "Delta = 5, alpha = 0.025 (one-sided), power = 90%",
+       x = "Assumed SD", y = "n per arm") +
+  theme_minimal()
+```
+
+```{r}
+# --- Survival endpoint: number of events ---
+# Hazard ratio = 0.70, alpha = 0.025 one-sided, power = 90%
+
+gs_surv <- nSurv(
+  lambdaC = log(2) / 12,   # Median survival 12 months in control
+  hr      = 0.70,           # Target hazard ratio
+  sided   = 1,
+  alpha   = 0.025,
+  beta    = 0.10,
+  T       = 36,             # Total study duration (months)
+  minfup  = 12              # Minimum follow-up (months)
+)
+
+summary(gs_surv)
+```
+
+```{r}
+# --- Non-inferiority sample size ---
+# Expected difference: 0 (new = control)
+# NI margin: -3 units
+# SD = 10, alpha = 0.025 one-sided, power = 80%
+
+delta_ni  <- 0      # Expected difference (new - control)
+margin    <- 3      # NI margin (must not be worse by more than 3)
+sd_ni     <- 10
+alpha_ni  <- 0.025
+power_ni  <- 0.80
+
+z_alpha <- qnorm(1 - alpha_ni)
+z_beta  <- qnorm(power_ni)
+
+n_ni <- (z_alpha + z_beta)^2 * 2 * sd_ni^2 / (delta_ni + margin)^2
+cat(sprintf("NI trial: required n per arm = %d\n", ceiling(n_ni)))
+```
+
+```{r}
+# --- Sensitivity: power vs. effect size ---
+deltas <- seq(2, 10, by = 0.5)
+powers <- sapply(deltas, function(d) {
+  pwr.t.test(n = 130, d = d / 12, sig.level = 0.025,
+             type = "two.sample", alternative = "greater")$power
+})
+
+ggplot(data.frame(delta = deltas, power = powers), aes(x = delta, y = power)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = 0.90, linetype = "dashed", color = "orange") +
+  labs(title = "Power vs. True Effect Size (n = 130/arm)",
+       x = "True Difference (delta)", y = "Power") +
+  theme_minimal()
+```
+
+---
+
+## 7. Key References
+
+- [ICH E9 Statistical Principles for Clinical Trials](https://www.fda.gov/media/71336/download)
+- Chow, S.C., Shao, J., & Wang, H. (2008). *Sample Size Calculations in Clinical Research*. CRC Press.
+- `pwr` R package: <https://cran.r-project.org/package=pwr>
+- `gsDesign` R package: <https://cran.r-project.org/package=gsDesign>

@@ -1,0 +1,190 @@
+---
+title: "04. Missing Data"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Missing Data Mechanisms
+
+Understanding *why* data are missing determines which methods are valid.
+
+### MCAR — Missing Completely At Random
+
+The probability of missingness is unrelated to any observed or unobserved data.
+
+$$P(R = 0 \mid Y_\text{obs}, Y_\text{mis}) = P(R = 0)$$
+
+Example: A blood sample is lost in the lab due to a processing error.
+
+- Complete case analysis is **unbiased** (but inefficient)
+- Rare in clinical trials
+
+---
+
+### MAR — Missing At Random
+
+The probability of missingness depends only on **observed** data, not unobserved outcomes.
+
+$$P(R = 0 \mid Y_\text{obs}, Y_\text{mis}) = P(R = 0 \mid Y_\text{obs})$$
+
+Example: Older patients drop out more, and age is recorded. Conditional on age, dropout is random.
+
+- Most standard methods (MMRM, multiple imputation) are valid under MAR
+- The most common assumption in regulatory submissions
+
+---
+
+### MNAR — Missing Not At Random
+
+The probability of missingness depends on the **unobserved** outcome itself.
+
+$$P(R = 0 \mid Y_\text{obs}, Y_\text{mis}) \neq P(R = 0 \mid Y_\text{obs})$$
+
+Example: Patients drop out because their condition worsened — and that worsening is the missing value.
+
+- Standard methods are **biased** under MNAR
+- Requires sensitivity analyses (tipping point, pattern-mixture models)
+
+---
+
+## 2. Common Methods
+
+| Method | Valid under | Notes |
+|---|---|---|
+| Complete case analysis | MCAR | Simple but loses data |
+| LOCF (last obs. carried forward) | Neither | Biased under MAR; avoid as primary |
+| MMRM | MAR | Preferred for continuous outcomes |
+| Multiple imputation (MI) | MAR | Flexible; works for various outcomes |
+| Pattern-mixture models | MNAR (assumption explicit) | Sensitivity analysis |
+| Tipping point analysis | MNAR | How bad must MNAR be to overturn results? |
+
+ICH E9(R1) recommends that the **primary analysis target the estimand** and handle missing data in a principled way aligned with the intercurrent event strategy.
+
+---
+
+## 3. Multiple Imputation (MI)
+
+MI proceeds in three steps:
+
+1. **Impute**: Generate $m$ complete datasets by drawing from $P(Y_\text{mis} \mid Y_\text{obs})$
+2. **Analyze**: Run the analysis model on each of the $m$ datasets
+3. **Pool**: Combine estimates using Rubin's rules
+
+### Rubin's Rules
+
+Let $\hat{\theta}_k$ and $\hat{V}_k$ be the estimate and variance from imputation $k$:
+
+$$\bar{\theta} = \frac{1}{m} \sum_{k=1}^m \hat{\theta}_k$$
+
+$$T = \bar{V} + \left(1 + \frac{1}{m}\right) B$$
+
+where $\bar{V}$ is the within-imputation variance and $B = \frac{1}{m-1}\sum(\hat{\theta}_k - \bar{\theta})^2$ is the between-imputation variance.
+
+---
+
+## 4. Sensitivity Analysis under MNAR
+
+After a MAR-based primary analysis, regulators expect sensitivity analyses to assess robustness to MNAR departures.
+
+### Reference-Based Imputation
+
+Impute missing post-dropout data using the trajectory of a **reference group** (e.g., placebo):
+
+- **Jump to reference (J2R)**: After dropout, the patient's outcome immediately follows the reference arm
+- **Copy reference (CR)**: The patient's trajectory copies the reference arm from dropout onward
+- **Last mean carried forward (LMCF)**: Impute using the last observed mean of the reference group
+
+### Tipping Point Analysis
+
+Find the value of the MNAR departure parameter $\delta$ at which the treatment effect becomes non-significant. If the tipping point is implausibly large, the conclusion is robust.
+
+---
+
+## 5. R Code Practice
+
+```{r}
+# install.packages(c("mice", "dplyr", "ggplot2"))
+library(mice)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+# Use nhanes dataset from mice (small, illustrative)
+data(nhanes, package = "mice")
+head(nhanes)
+summary(nhanes)
+
+# Check missing data pattern
+md.pattern(nhanes, rotate.names = TRUE)
+```
+
+```{r}
+# Multiple imputation with m = 20 imputations
+imp <- mice(nhanes, m = 20, method = "pmm", seed = 123, printFlag = FALSE)
+
+# Inspect one completed dataset
+complete(imp, 1) |> head()
+```
+
+```{r}
+# Analyze: linear regression on each imputed dataset
+# Outcome: chl (cholesterol), predictor: age + bmi + hyp
+fit_list <- with(imp, lm(chl ~ age + bmi + hyp))
+
+# Pool results using Rubin's rules
+pooled <- pool(fit_list)
+summary(pooled)
+```
+
+```{r}
+# Visualize: compare observed vs. imputed distributions for bmi
+imp_long <- complete(imp, action = "long", include = TRUE)
+
+ggplot(imp_long, aes(x = bmi, fill = factor(.imp == 0))) +
+  geom_density(alpha = 0.4) +
+  scale_fill_manual(values = c("steelblue", "tomato"),
+                    labels = c("Imputed", "Observed")) +
+  labs(title = "BMI: Observed vs. Imputed Distributions",
+       x = "BMI", fill = "") +
+  theme_minimal()
+```
+
+```{r}
+# Simple tipping point illustration
+# Suppose primary analysis gives: estimate = 3.2, SE = 1.1
+# Sensitivity: shift imputed values for treatment arm by delta
+# Find delta where p-value crosses 0.05
+
+est0 <- 3.2
+se0  <- 1.1
+
+deltas  <- seq(0, -5, by = -0.1)
+p_vals  <- 2 * pnorm(abs((est0 + deltas) / se0), lower.tail = FALSE)
+
+tipping <- data.frame(delta = deltas, p_value = p_vals)
+
+ggplot(tipping, aes(x = delta, y = p_value)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "Tipping Point Analysis",
+       x = expression(delta ~ "(MNAR shift for treatment arm)"),
+       y = "p-value") +
+  theme_minimal()
+```
+
+---
+
+## 6. Key References
+
+- Rubin, D.B. (1987). *Multiple Imputation for Nonresponse in Surveys*. Wiley.
+- [ICH E9(R1) Addendum on Estimands](https://www.ich.org/page/efficacy-guidelines)
+- van Buuren, S. (2018). *Flexible Imputation of Missing Data*. <https://stefvanbuuren.name/fimd/>
+- `mice` R package: <https://cran.r-project.org/package=mice>
